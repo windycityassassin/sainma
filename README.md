@@ -1,162 +1,75 @@
 # Sainma
 
-A powerful movie answer engine leveraging AI agents for real-time search and clip generation.
+A movie answer engine. You ask "the scene where the lightsaber duel happens on the lava planet" and it returns the actual clip, not a Google result and a timestamp guess.
 
-## Features
+## The problem
 
-### Intelligent Search
-- Natural language query understanding
-- Scene-level search with semantic understanding
-- Character and dialogue-based search
-- Emotion and action recognition
-- Context-aware results
+Finding a specific scene in a movie is brittle. You either remember the exact dialogue (rare), scrub the timeline (slow), or search YouTube and hope someone uploaded that exact moment (often not). Existing video search tools index transcripts, which fails the moment the scene is visual, emotional, or wordless.
 
-### Smart Clip Generation
-- Automatic scene detection
-- High-quality clip generation
-- Smooth scene transitions
-- Video stabilization
-- Quality optimization
+Sainma treats a movie as a searchable corpus of scenes, where each scene has a visual fingerprint, a dialogue track, a character roster, and an emotional shape. Natural language queries hit all four signals at once.
 
-### AI Agent Coordination
-- Crew of specialized AI agents
-- Efficient resource management
-- Smart caching system
-- Error recovery mechanisms
+## Approach
 
-## Project Structure
+A crew of specialized agents, orchestrated with CrewAI. Each agent owns one slice of the problem and the chief agent routes the query.
 
-```
-sainma/
-├── sainma/                # Main package
-│   ├── agents/           # AI Agents
-│   │   ├── chief_agent.py       # Coordination and planning
-│   │   ├── movie_expert.py      # Movie knowledge
-│   │   ├── visual_analyst.py    # Visual analysis
-│   │   ├── dialogue_expert.py   # Dialogue processing
-│   │   └── clip_director.py     # Clip generation
-│   │
-│   ├── search/          # Search System
-│   │   ├── query_processor.py   # Query understanding
-│   │   ├── scene_indexer.py     # Scene indexing
-│   │   └── search_engine.py     # Search coordination
-│   │
-│   ├── clips/           # Clip Generation
-│   │   ├── frame_extractor.py   # Frame processing
-│   │   ├── scene_detector.py    # Scene detection
-│   │   └── clip_generator.py    # Clip creation
-│   │
-│   ├── coordination/    # System Coordination
-│   │   ├── coordinator.py       # Main coordinator
-│   │   ├── resource_manager.py  # Resource management
-│   │   ├── cache_manager.py     # Caching system
-│   │   ├── error_handler.py     # Error handling
-│   │   └── context_manager.py   # Context sharing
-│   │
-│   └── utils/          # Utilities
-│       └── logger.py          # Logging system
-│
-├── tests/              # Test Suite
-│   ├── test_search.py        # Search tests
-│   ├── test_clips.py         # Clip tests
-│   └── test_coordination.py  # Coordination tests
-│
-├── data/               # Data Directory
-│   ├── movies/        # Movie files
-│   ├── cache/         # Cache storage
-│   ├── index/         # Search indices
-│   └── clips/         # Generated clips
-│
-└── logs/              # Log files
-```
+- **Chief Agent.** Parses the query, decomposes it into subtasks, dispatches to specialists, compiles results.
+- **Movie Expert.** Owns plot, characters, scene context. Resolves "the duel" to candidate scenes by knowledge.
+- **Visual Analyst.** Runs CLIP for scene understanding, YOLOv8 for objects, scene-boundary detection on raw frames.
+- **Dialogue Expert.** Runs Whisper for speech-to-text, RoBERTa for sentiment, matches on quoted lines.
+- **Clip Director.** Takes the winning scenes, stitches boundaries with ffmpeg, exports a playlist.
 
-## Installation
+The specialists run in parallel. The chief agent compiles their outputs into a ranked list with weighted scoring: semantic similarity (30%), character relevance (20%), scene type (20%), emotion match (15%), temporal context (15%).
 
-1. Clone the repository:
+## What makes it work
+
+Multimodal scene embeddings are the load-bearing piece. Each scene gets a fused vector from three encoders:
+
+- Visual via CLIP (40% weight) over sampled frames.
+- Audio via Wav2Vec2 (30%) over 16kHz segments.
+- Text via MPNet (30%) over scene type, character presence, actions, dialogue.
+
+Indexed with FAISS for sub-second retrieval over hours of footage. Caching at four layers: character detection, embeddings, temporal context, name matching. A 2-hour film indexes once, queries forever.
+
+## Run locally
+
+You need ffmpeg installed and a Deepseek or OpenAI API key for the chief agent's reasoning.
+
 ```bash
-git clone https://github.com/yourusername/sainma.git
+git clone https://github.com/windycityassassin/sainma.git
 cd sainma
-```
-
-2. Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-```
-
-4. Copy and configure environment variables:
-```bash
 cp .env.example .env
-# Edit .env with your configuration
+# Edit .env: set DEEPSEEK_API_KEY or OPENAI_API_KEY, MOVIE_DATA_DIR
 ```
 
-## Usage
+Drop a video into your `MOVIE_DATA_DIR` and run the scene search demo:
 
-1. Start the system:
-```python
-from sainma.coordination.coordinator import SainmaCoordinator
-
-coordinator = SainmaCoordinator()
-
-# Search for a scene
-results = coordinator.search("Show me the fight scene between Iron Man and Thanos")
-
-# Generate a clip
-clip = coordinator.generate_clip(results[0])
-```
-
-## Development
-
-### Running Tests
 ```bash
-pytest tests/
+# Edit demo_scene_search.py to point video_paths at real files, then:
+python demo_scene_search.py
 ```
 
-### Code Style
-We follow PEP 8 guidelines. Run linting:
+Or test clip generation against a short video without the full search stack:
+
 ```bash
-flake8 sainma/
+python demo_clip_generation.py
 ```
 
-## Configuration
+First indexing pass on a 2-hour film takes 10 to 20 minutes on CPU, a few minutes with CUDA. Subsequent queries are sub-second.
 
-Key configuration options in `.env`:
-- `MOVIE_DATA_DIR`: Directory containing movie files
-- `CACHE_DIR`: Directory for caching results
-- `MAX_CLIP_LENGTH`: Maximum clip duration in seconds
-- `SEARCH_THRESHOLD`: Minimum similarity score for search results
-- `GPU_MEMORY_LIMIT`: Maximum GPU memory usage (0.0-1.0)
+## What I learned
 
-See `.env.example` for all configuration options.
+- **Agent orchestration is not free.** CrewAI gives you a clean mental model, but the latency tax of routing a query through five LLM calls is real. The parallel-fanout pattern (chief decomposes, specialists run concurrently, chief recombines) was the only way to keep the end-to-end under 30 seconds.
+- **Semantic search quality lives or dies on the embedding mix.** Visual-only retrieval ranks fight scenes by camera motion and misses the dialogue payoff. Text-only retrieval misses the wordless beats. The 40/30/30 visual/audio/text weighting was tuned empirically and is still the most fragile number in the system.
+- **Video processing has no fast path.** Frame extraction, scene-boundary detection, and audio resampling each cost real time. Aggressive caching at every layer was the difference between a 20-minute first-run and a 6-hour first-run.
+- **Character name matching is its own NLP problem.** "Tony", "Stark", "Iron Man", "Mr. Stark" all point to one entity. A naive exact-match recall was around 40%. Fuzzy matching (token-sort ratio + alias table + title normalization) pushed it past 90%.
+- **Specialist agents beat one big agent.** Early versions had a single CrewAI agent with every tool attached. It hallucinated tool calls and lost context. Splitting by domain (visual, dialogue, plot) made each agent's prompt tractable and the failure modes legible.
 
-## Dependencies
+## Architecture detail
 
-Core dependencies:
-- CrewAI: Agent coordination
-- PyTorch: ML operations
-- OpenCV: Video processing
-- FAISS: Similarity search
-- Sentence Transformers: Text embeddings
-
-See `requirements.txt` for complete list.
+See `AGENT_ARCHITECTURE.md` for the full agent crew layout, tool assignments, and the parallel-processing flow. See `DEVELOPMENT_ROADMAP.md` for the per-feature implementation status.
 
 ## License
 
-MIT License. See LICENSE file for details.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## Roadmap
-
-See `DEVELOPMENT_ROADMAP.md` for detailed development plans.
+MIT.
