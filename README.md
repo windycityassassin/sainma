@@ -2,6 +2,8 @@
 
 A movie answer engine. You ask "the scene where the lightsaber duel happens on the lava planet" and it returns the actual clip, not a Google result and a timestamp guess.
 
+[Live demo](https://huggingface.co/spaces/windycityassassin/sainma-demo) (slim public version: sentence-transformers over A Trip to the Moon, no agent crew, no API key required)
+
 ## The problem
 
 Finding a specific scene in a movie is brittle. You either remember the exact dialogue (rare), scrub the timeline (slow), or search YouTube and hope someone uploaded that exact moment (often not). Existing video search tools index transcripts, which fails the moment the scene is visual, emotional, or wordless.
